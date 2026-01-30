@@ -1,0 +1,227 @@
+"""
+Handlers - Telegram message and command handlers.
+"""
+import os
+import logging
+from collections import defaultdict
+
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, CommandStart
+from aiogram.enums import ChatAction
+
+from config import (
+    TEMP_DIR,
+    MESSAGES,
+    DEFAULT_LANG,
+    MAX_AUDIO_DURATION_SECONDS,
+)
+from services.rate_limiter import rate_limiter
+from services.audio_service import (
+    ensure_temp_dir,
+    convert_oga_to_mp3,
+    check_audio_duration,
+    cleanup_temp_files,
+    delete_file,
+)
+from services.ai_service import translate_audio, translate_text
+
+logger = logging.getLogger(__name__)
+
+# Create router
+router = Router()
+
+# User language preferences (in-memory storage)
+user_languages: dict[int, str] = defaultdict(lambda: DEFAULT_LANG)
+
+
+def get_msg(user_id: int, key: str) -> str:
+    """Get message in user's preferred language."""
+    lang = user_languages[user_id]
+    return MESSAGES.get(lang, MESSAGES[DEFAULT_LANG]).get(key, "")
+
+
+def get_lang_name(lang_code: str) -> str:
+    """Get language display name."""
+    return "English" if lang_code == "en" else "ខ្មែរ (Khmer)" if lang_code == "km" else lang_code
+
+
+def format_voice_response(user_id: int, result: dict) -> str:
+    """Format translation result for voice messages."""
+    lang = result.get("detected_lang", "?")
+    lang_name = get_lang_name(lang)
+    
+    msg = get_msg(user_id, "detected_lang").format(lang=lang_name)
+    msg += f"\n\n{get_msg(user_id, 'transcription')}\n{result.get('transcription', '—')}"
+    msg += f"\n\n{get_msg(user_id, 'translation')}\n{result.get('translation', '—')}"
+    
+    return msg
+
+
+def format_text_response(user_id: int, result: dict) -> str:
+    """Format translation result for text messages."""
+    lang = result.get("detected_lang", "?")
+    source_lang = get_lang_name(lang)
+    target_lang = "ខ្មែរ (Khmer)" if lang == "en" else "English"
+    
+    msg = f"📝 **{source_lang} → {target_lang}**\n\n"
+    msg += result.get('original', result.get('transcription', '—'))
+    msg += f"\n\n{get_msg(user_id, 'translation')}\n{result.get('translation', '—')}"
+    
+    return msg
+
+
+def get_language_keyboard() -> InlineKeyboardMarkup:
+    """Create language selection keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en"),
+            InlineKeyboardButton(text="🇰🇭 ខ្មែរ", callback_data="lang_km"),
+        ]
+    ])
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message):
+    """Handle /start command."""
+    user_id = message.from_user.id
+    await message.answer(get_msg(user_id, "welcome"))
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    """Handle /help command."""
+    user_id = message.from_user.id
+    await message.answer(get_msg(user_id, "help"), parse_mode="Markdown")
+
+
+@router.message(Command("lang"))
+async def cmd_lang(message: Message):
+    """Handle /lang command - show language selection."""
+    user_id = message.from_user.id
+    await message.answer(
+        get_msg(user_id, "lang_prompt"),
+        reply_markup=get_language_keyboard()
+    )
+
+
+@router.callback_query(F.data.startswith("lang_"))
+async def callback_lang(callback: CallbackQuery):
+    """Handle language selection callback."""
+    user_id = callback.from_user.id
+    lang_code = callback.data.replace("lang_", "")
+    
+    if lang_code in MESSAGES:
+        user_languages[user_id] = lang_code
+        await callback.message.edit_text(
+            MESSAGES[lang_code]["lang_changed"]
+        )
+    
+    await callback.answer()
+
+
+@router.message(Command("t"))
+async def cmd_translate_text(message: Message):
+    """Handle /t <text> command for text translation."""
+    user_id = message.from_user.id
+    
+    # Check rate limit
+    allowed, minutes = rate_limiter.check(user_id)
+    if not allowed:
+        await message.answer(
+            get_msg(user_id, "error_rate_limit").format(minutes=minutes)
+        )
+        return
+    
+    # Extract text after /t command
+    text = message.text
+    if text:
+        text = text.split(maxsplit=1)
+        text = text[1] if len(text) > 1 else ""
+    
+    if not text or not text.strip():
+        await message.answer(get_msg(user_id, "error_text_required"))
+        return
+    
+    # Record request
+    rate_limiter.record(user_id)
+    
+    # Show processing indicator
+    await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+    
+    try:
+        result = await translate_text(text.strip())
+        response = format_text_response(user_id, result)
+        await message.answer(response, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error translating text: {e}")
+        await message.answer(get_msg(user_id, "error_processing"))
+
+
+@router.message(F.voice)
+async def handle_voice(message: Message):
+    """Handle voice messages - transcribe and translate."""
+    user_id = message.from_user.id
+    
+    # Check rate limit
+    allowed, minutes = rate_limiter.check(user_id)
+    if not allowed:
+        await message.answer(
+            get_msg(user_id, "error_rate_limit").format(minutes=minutes)
+        )
+        return
+    
+    # Ensure temp directory exists
+    ensure_temp_dir()
+    
+    # Download voice file
+    voice = message.voice
+    file_id = voice.file_id
+    oga_path = os.path.join(TEMP_DIR, f"{file_id}.oga")
+    mp3_path = None
+    
+    try:
+        # Download the file
+        file = await message.bot.get_file(file_id)
+        await message.bot.download_file(file.file_path, oga_path)
+        
+        # Check duration
+        is_valid, duration = check_audio_duration(oga_path)
+        if not is_valid:
+            await message.answer(
+                get_msg(user_id, "error_audio_too_long").format(
+                    max_seconds=MAX_AUDIO_DURATION_SECONDS
+                )
+            )
+            delete_file(oga_path)
+            return
+        
+        # Record request (after validation passes)
+        rate_limiter.record(user_id)
+        
+        # Show processing indicator
+        processing_msg = await message.answer(get_msg(user_id, "processing"))
+        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+        
+        # Convert to MP3
+        mp3_path = convert_oga_to_mp3(oga_path)
+        
+        # Translate
+        result = await translate_audio(mp3_path)
+        
+        # Delete processing message and send result
+        await processing_msg.delete()
+        response = format_voice_response(user_id, result)
+        await message.answer(response, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error processing voice: {e}")
+        await message.answer(get_msg(user_id, "error_processing"))
+    finally:
+        # Cleanup files
+        delete_file(oga_path)
+        if mp3_path:
+            delete_file(mp3_path)
+        
+        # Trigger periodic cleanup
+        cleanup_temp_files()
