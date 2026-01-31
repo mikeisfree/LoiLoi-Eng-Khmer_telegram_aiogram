@@ -1,8 +1,10 @@
 """
 Handlers - Telegram message and command handlers.
+Uses Gemini for both STT and translation (single API call).
 """
 import os
 import logging
+import asyncio
 from collections import defaultdict
 
 from aiogram import Router, F
@@ -19,10 +21,10 @@ from config import (
 from services.rate_limiter import rate_limiter
 from services.audio_service import (
     ensure_temp_dir,
-    convert_oga_to_mp3,
+    compress_audio,
     check_audio_duration,
     cleanup_temp_files,
-    delete_file,
+    delete_files,
 )
 from services.ai_service import translate_audio, translate_text
 
@@ -47,25 +49,23 @@ def get_lang_name(lang_code: str) -> str:
 
 
 def format_voice_response(user_id: int, result: dict) -> str:
-    """Format translation result for voice messages."""
-    lang = result.get("detected_lang", "?")
+    """Format voice message response."""
+    lang = result.get("lang", "?")
     lang_name = get_lang_name(lang)
     
     msg = get_msg(user_id, "detected_lang").format(lang=lang_name)
-    msg += f"\n\n{get_msg(user_id, 'transcription')}\n{result.get('transcription', '—')}"
+    msg += f"\n\n{get_msg(user_id, 'transcription')}\n{result.get('text', '—')}"
     msg += f"\n\n{get_msg(user_id, 'translation')}\n{result.get('translation', '—')}"
     
     return msg
 
 
-def format_text_response(user_id: int, result: dict) -> str:
-    """Format translation result for text messages."""
-    lang = result.get("detected_lang", "?")
-    source_lang = get_lang_name(lang)
-    target_lang = "ខ្មែរ (Khmer)" if lang == "en" else "English"
+def format_text_response(user_id: int, original: str, result: dict) -> str:
+    """Format text translation response."""
+    source = get_lang_name(result.get("from", "en"))
+    target = get_lang_name(result.get("to", "km"))
     
-    msg = f"📝 **{source_lang} → {target_lang}**\n\n"
-    msg += result.get('original', result.get('transcription', '—'))
+    msg = f"📝 **{source} → {target}**\n\n{original}"
     msg += f"\n\n{get_msg(user_id, 'translation')}\n{result.get('translation', '—')}"
     
     return msg
@@ -113,9 +113,7 @@ async def callback_lang(callback: CallbackQuery):
     
     if lang_code in MESSAGES:
         user_languages[user_id] = lang_code
-        await callback.message.edit_text(
-            MESSAGES[lang_code]["lang_changed"]
-        )
+        await callback.message.edit_text(MESSAGES[lang_code]["lang_changed"])
     
     await callback.answer()
 
@@ -133,25 +131,24 @@ async def cmd_translate_text(message: Message):
         )
         return
     
-    # Extract text after /t command
+    # Extract text after /t
     text = message.text
     if text:
-        text = text.split(maxsplit=1)
-        text = text[1] if len(text) > 1 else ""
+        parts = text.split(maxsplit=1)
+        text = parts[1] if len(parts) > 1 else ""
     
     if not text or not text.strip():
         await message.answer(get_msg(user_id, "error_text_required"))
         return
     
-    # Record request
     rate_limiter.record(user_id)
     
-    # Show processing indicator
+    # Typing indicator
     await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
     
     try:
         result = await translate_text(text.strip())
-        response = format_text_response(user_id, result)
+        response = format_text_response(user_id, text.strip(), result)
         await message.answer(response, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error translating text: {e}")
@@ -160,7 +157,12 @@ async def cmd_translate_text(message: Message):
 
 @router.message(F.voice)
 async def handle_voice(message: Message):
-    """Handle voice messages - transcribe and translate."""
+    """
+    Handle voice messages:
+    1. Download audio
+    2. Compress (8kHz OGG)
+    3. Gemini: STT + translate (single API call)
+    """
     user_id = message.from_user.id
     
     # Check rate limit
@@ -171,45 +173,42 @@ async def handle_voice(message: Message):
         )
         return
     
-    # Ensure temp directory exists
     ensure_temp_dir()
     
-    # Download voice file
     voice = message.voice
     file_id = voice.file_id
     oga_path = os.path.join(TEMP_DIR, f"{file_id}.oga")
-    mp3_path = None
+    compressed_path = None
     
     try:
-        # Download the file
+        # Send processing message
+        processing_msg = await message.answer(get_msg(user_id, "processing"))
+        
+        # Download file
         file = await message.bot.get_file(file_id)
         await message.bot.download_file(file.file_path, oga_path)
         
         # Check duration
         is_valid, duration = check_audio_duration(oga_path)
         if not is_valid:
+            await processing_msg.delete()
             await message.answer(
                 get_msg(user_id, "error_audio_too_long").format(
                     max_seconds=MAX_AUDIO_DURATION_SECONDS
                 )
             )
-            delete_file(oga_path)
+            delete_files(oga_path)
             return
         
-        # Record request (after validation passes)
         rate_limiter.record(user_id)
         
-        # Show processing indicator
-        processing_msg = await message.answer(get_msg(user_id, "processing"))
-        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+        # Compress audio (8kHz mono OGG) - faster upload
+        compressed_path = compress_audio(oga_path)
         
-        # Convert to MP3
-        mp3_path = convert_oga_to_mp3(oga_path)
+        # Gemini: STT + translate in single call
+        result = await translate_audio(compressed_path)
         
-        # Translate
-        result = await translate_audio(mp3_path)
-        
-        # Delete processing message and send result
+        # Send result
         await processing_msg.delete()
         response = format_voice_response(user_id, result)
         await message.answer(response, parse_mode="Markdown")
@@ -218,10 +217,6 @@ async def handle_voice(message: Message):
         logger.error(f"Error processing voice: {e}")
         await message.answer(get_msg(user_id, "error_processing"))
     finally:
-        # Cleanup files
-        delete_file(oga_path)
-        if mp3_path:
-            delete_file(mp3_path)
-        
-        # Trigger periodic cleanup
+        # Cleanup in background
+        delete_files(oga_path, compressed_path)
         cleanup_temp_files()
