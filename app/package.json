@@ -1,0 +1,23 @@
+{
+  "name": "loiloi-translator",
+  "version": "1.0.0",
+  "description": "Voice translator English ↔️ Khmer",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx http-server . -p 3000 -o",
+    "build": "npx cap sync && npx cap open android"
+  },
+  "keywords": [
+    "translator",
+    "khmer",
+    "english",
+    "voice"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@capacitor/android": "^8.0.2",
+    "@capacitor/cli": "^8.0.2",
+    "@capacitor/core": "^8.0.2"
+  }
+}

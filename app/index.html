@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <title>LoiLoi Translator</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <!-- Header -->
+      <header class="header">
+        <div class="lang-toggle" id="langToggle">
+          <button class="lang-btn active" data-lang="en">EN</button>
+          <button class="lang-btn" data-lang="km">កម</button>
+        </div>
+        <button class="btn-icon" id="settingsBtn" aria-label="Settings">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+            />
+          </svg>
+        </button>
+      </header>
+
+      <!-- Main Content -->
+      <main class="main">
+        <!-- API Key Warning -->
+        <div class="api-warning" id="apiWarning">
+          <span class="warning-icon">⚠️</span>
+          <span data-i18n="noApiKeyWarning">Please set your API key in Settings</span>
+        </div>
+
+        <!-- Status -->
+        <div class="status" id="status">
+          <span class="status-text" data-i18n=""></span>
+        </div>
+
+        <!-- Record Button -->
+        <div class="record-container">
+          <button class="record-btn" id="recordBtn" aria-label="Hold to record">
+            <div class="record-btn-inner">
+              <svg
+                class="mic-icon"
+                width="48"
+                height="48"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path
+                  d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"
+                />
+                <path
+                  d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"
+                />
+              </svg>
+            </div>
+            <div class="pulse-ring"></div>
+          </button>
+          <p class="record-hint" data-i18n="holdToRecord">Hold to record</p>
+        </div>
+
+        <!-- Results -->
+        <div class="results" id="results">
+          <div class="result-card" id="originalCard">
+            <div class="result-label">
+              <span class="result-icon">📝</span>
+              <span data-i18n="original">Original</span>
+            </div>
+            <div class="result-scroll-wrapper">
+              <button class="scroll-arrow scroll-up" data-direction="up" aria-label="Scroll up">▲</button>
+              <div class="result-content">
+                <p class="result-text" id="originalText">—</p>
+              </div>
+              <button class="scroll-arrow scroll-down" data-direction="down" aria-label="Scroll down">▼</button>
+            </div>
+          </div>
+          <div class="result-card" id="translationCard">
+            <div class="result-label">
+              <span class="result-icon">🔄</span>
+              <span data-i18n="translation">Translation</span>
+            </div>
+            <div class="result-scroll-wrapper">
+              <button class="scroll-arrow scroll-up" data-direction="up" aria-label="Scroll up">▲</button>
+              <div class="result-content">
+                <p class="result-text" id="translationText">—</p>
+              </div>
+              <button class="scroll-arrow scroll-down" data-direction="down" aria-label="Scroll down">▼</button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Settings Modal -->
+      <div class="modal" id="settingsModal">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 data-i18n="settings">Settings</h2>
+            <button class="btn-icon modal-close" id="closeSettings">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="apiKey" data-i18n="apiKeyLabel">Gemini API Key</label>
+              <input
+                type="password"
+                id="apiKey"
+                class="input"
+                placeholder="AIza..."
+              />
+              <p class="form-hint" data-i18n="apiKeyHint">
+                Get your key from Google AI Studio
+              </p>
+            </div>
+            <a
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              class="link"
+              data-i18n="getApiKey"
+            >
+              Get API Key →
+            </a>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" id="saveSettings" data-i18n="save">
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- No API Key Warning -->
+      <div class="toast" id="toast"></div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
