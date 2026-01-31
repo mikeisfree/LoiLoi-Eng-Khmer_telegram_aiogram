@@ -17,9 +17,11 @@
     <div class="app">
       <!-- Header -->
       <header class="header">
-        <div class="lang-toggle" id="langToggle">
-          <button class="lang-btn active" data-lang="en">EN</button>
-          <button class="lang-btn" data-lang="km">កម</button>
+        <!-- Language Pair Selector -->
+        <div class="lang-selector" id="langSelector">
+          <button class="lang-flag-btn active" data-lang="en" title="English">🇬🇧</button>
+          <button class="lang-flag-btn active" data-lang="km" title="ខ្មែរ">🇰🇭</button>
+          <button class="lang-flag-btn" data-lang="pl" title="Polski">🇵🇱</button>
         </div>
         <button class="btn-icon" id="settingsBtn" aria-label="Settings">
           <svg
@@ -40,6 +42,11 @@
 
       <!-- Main Content -->
       <main class="main">
+        <!-- Select 2 Languages Warning -->
+        <div class="lang-warning" id="langWarning">
+          <span data-i18n="select2Languages">Select 2 languages to translate</span>
+        </div>
+
         <!-- API Key Warning -->
         <div class="api-warning" id="apiWarning">
           <span class="warning-icon">⚠️</span>

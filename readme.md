@@ -1,6 +1,6 @@
 # LoiLoi: English ↔️ Khmer Voice Translator
 
-Bidirectional voice translator for **English (EN) ↔️ Khmer (KM)** available as:
+Bidirectional voice translator for **English (EN) ↔️ Khmer (KM) ↔️ Polish (PL)** available as:
 
 - 🤖 **Telegram Bot** (Python/aiogram)
 - 📱 **Android App** (Capacitor)

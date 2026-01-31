@@ -1,6 +1,6 @@
 """
 Handlers - Telegram message and command handlers.
-Uses Gemini for both STT and translation (single API call).
+Uses Gemini for both STT and translation.
 """
 import os
 import logging
@@ -16,6 +16,9 @@ from config import (
     TEMP_DIR,
     MESSAGES,
     DEFAULT_LANG,
+    DEFAULT_LANG_PAIR,
+    SUPPORTED_LANGUAGES,
+    LANGUAGE_PAIRS,
     MAX_AUDIO_DURATION_SECONDS,
 )
 from services.rate_limiter import rate_limiter
@@ -33,8 +36,9 @@ logger = logging.getLogger(__name__)
 # Create router
 router = Router()
 
-# User language preferences (in-memory storage)
+# User preferences (in-memory storage)
 user_languages: dict[int, str] = defaultdict(lambda: DEFAULT_LANG)
+user_lang_pairs: dict[int, tuple] = defaultdict(lambda: DEFAULT_LANG_PAIR)
 
 
 def get_msg(user_id: int, key: str) -> str:
@@ -45,7 +49,10 @@ def get_msg(user_id: int, key: str) -> str:
 
 def get_lang_name(lang_code: str) -> str:
     """Get language display name."""
-    return "English" if lang_code == "en" else "ខ្មែរ (Khmer)" if lang_code == "km" else lang_code
+    lang_info = SUPPORTED_LANGUAGES.get(lang_code)
+    if lang_info:
+        return f"{lang_info['flag']} {lang_info['name']}"
+    return lang_code
 
 
 def format_voice_response(user_id: int, result: dict) -> str:
@@ -72,20 +79,40 @@ def format_text_response(user_id: int, original: str, result: dict) -> str:
 
 
 def get_language_keyboard() -> InlineKeyboardMarkup:
-    """Create language selection keyboard."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en"),
-            InlineKeyboardButton(text="🇰🇭 ខ្មែរ", callback_data="lang_km"),
-        ]
-    ])
+    """Create language selection keyboard (for UI language)."""
+    buttons = []
+    for code, info in SUPPORTED_LANGUAGES.items():
+        buttons.append(InlineKeyboardButton(
+            text=f"{info['flag']} {info['name']}", 
+            callback_data=f"lang_{code}"
+        ))
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+
+def get_pair_keyboard() -> InlineKeyboardMarkup:
+    """Create language pair selection keyboard."""
+    buttons = []
+    for lang1, lang2 in LANGUAGE_PAIRS:
+        info1 = SUPPORTED_LANGUAGES[lang1]
+        info2 = SUPPORTED_LANGUAGES[lang2]
+        buttons.append([InlineKeyboardButton(
+            text=f"{info1['flag']} {info1['name']} ↔ {info2['flag']} {info2['name']}", 
+            callback_data=f"pair_{lang1}_{lang2}"
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     """Handle /start command."""
     user_id = message.from_user.id
-    await message.answer(get_msg(user_id, "welcome"))
+    pair = user_lang_pairs[user_id]
+    lang1_name = get_lang_name(pair[0])
+    lang2_name = get_lang_name(pair[1])
+    
+    welcome = get_msg(user_id, "welcome")
+    current = get_msg(user_id, "current_pair").format(lang1=lang1_name, lang2=lang2_name)
+    await message.answer(f"{welcome}\n\n{current}")
 
 
 @router.message(Command("help"))
@@ -97,7 +124,7 @@ async def cmd_help(message: Message):
 
 @router.message(Command("lang"))
 async def cmd_lang(message: Message):
-    """Handle /lang command - show language selection."""
+    """Handle /lang command - show UI language selection."""
     user_id = message.from_user.id
     await message.answer(
         get_msg(user_id, "lang_prompt"),
@@ -105,15 +132,51 @@ async def cmd_lang(message: Message):
     )
 
 
+@router.message(Command("pair"))
+async def cmd_pair(message: Message):
+    """Handle /pair command - show language pair selection."""
+    user_id = message.from_user.id
+    pair = user_lang_pairs[user_id]
+    lang1_name = get_lang_name(pair[0])
+    lang2_name = get_lang_name(pair[1])
+    
+    current = get_msg(user_id, "current_pair").format(lang1=lang1_name, lang2=lang2_name)
+    prompt = get_msg(user_id, "pair_prompt")
+    
+    await message.answer(
+        f"{current}\n\n{prompt}",
+        reply_markup=get_pair_keyboard()
+    )
+
+
 @router.callback_query(F.data.startswith("lang_"))
 async def callback_lang(callback: CallbackQuery):
-    """Handle language selection callback."""
+    """Handle UI language selection callback."""
     user_id = callback.from_user.id
     lang_code = callback.data.replace("lang_", "")
     
     if lang_code in MESSAGES:
         user_languages[user_id] = lang_code
         await callback.message.edit_text(MESSAGES[lang_code]["lang_changed"])
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pair_"))
+async def callback_pair(callback: CallbackQuery):
+    """Handle language pair selection callback."""
+    user_id = callback.from_user.id
+    parts = callback.data.split("_")
+    
+    if len(parts) == 3:
+        lang1, lang2 = parts[1], parts[2]
+        user_lang_pairs[user_id] = (lang1, lang2)
+        
+        lang1_name = get_lang_name(lang1)
+        lang2_name = get_lang_name(lang2)
+        
+        msg = get_msg(user_id, "pair_changed").format(lang1=lang1_name, lang2=lang2_name)
+        await callback.message.edit_text(msg)
     
     await callback.answer()
 
@@ -147,7 +210,9 @@ async def cmd_translate_text(message: Message):
     await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
     
     try:
-        result = await translate_text(text.strip())
+        # Get user's language pair
+        lang_pair = user_lang_pairs[user_id]
+        result = await translate_text(text.strip(), lang_pair)
         response = format_text_response(user_id, text.strip(), result)
         await message.answer(response, parse_mode="Markdown")
     except Exception as e:
@@ -161,7 +226,7 @@ async def handle_voice(message: Message):
     Handle voice messages:
     1. Download audio
     2. Compress (8kHz OGG)
-    3. Gemini: STT + translate (single API call)
+    3. Gemini: STT + translate
     """
     user_id = message.from_user.id
     
@@ -205,8 +270,11 @@ async def handle_voice(message: Message):
         # Compress audio (8kHz mono OGG) - faster upload
         compressed_path = compress_audio(oga_path)
         
-        # Gemini: STT + translate in single call
-        result = await translate_audio(compressed_path)
+        # Get user's language pair
+        lang_pair = user_lang_pairs[user_id]
+        
+        # Gemini: STT + translate
+        result = await translate_audio(compressed_path, lang_pair)
         
         # Send result
         await processing_msg.delete()

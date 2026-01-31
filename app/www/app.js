@@ -1,7 +1,17 @@
 /**
  * LoiLoi Translator - Main Application
- * Voice translator EN ↔️ KM using Gemini API
+ * Voice translator with multi-language support
  */
+
+// ========================================
+// Languages Configuration
+// ========================================
+
+const LANGUAGES = {
+    en: { name: 'English', flag: '🇬🇧' },
+    km: { name: 'ខ្មែរ (Khmer)', flag: '🇰🇭' },
+    pl: { name: 'Polski', flag: '🇵🇱' }
+};
 
 // ========================================
 // Translations (i18n)
@@ -22,6 +32,7 @@ const translations = {
         save: 'Save',
         noApiKey: 'Please set your API key in Settings',
         noApiKeyWarning: 'Please set your API key in Settings ⚙️',
+        select2Languages: 'Select 2 languages to translate',
         apiKeySaved: 'API key saved!',
         errorRecording: 'Could not access microphone',
         errorProcessing: 'Error processing audio',
@@ -41,10 +52,31 @@ const translations = {
         save: 'រក្សាទុក',
         noApiKey: 'សូមកំណត់ API key របស់អ្នកក្នុង Settings',
         noApiKeyWarning: 'សូមកំណត់ API key នៅ Settings ⚙️',
+        select2Languages: 'ជ្រើសរើសភាសា 2 ដើម្បីបកប្រែ',
         apiKeySaved: 'រក្សាទុក API key ហើយ!',
         errorRecording: 'មិនអាចប្រើមីក្រូហ្វូន',
         errorProcessing: 'កំហុសក្នុងការដំណើរការសំឡេង',
         errorNetwork: 'កំហុសបណ្តាញ។ សូមព្យាយាមម្តងទៀត។',
+    },
+    pl: {
+        ready: 'Gotowy',
+        recording: 'Nagrywanie...',
+        processing: 'Przetwarzanie...',
+        holdToRecord: 'Przytrzymaj aby nagrać',
+        original: 'Oryginał',
+        translation: 'Tłumaczenie',
+        settings: 'Ustawienia',
+        apiKeyLabel: 'Klucz API Gemini',
+        apiKeyHint: 'Pobierz klucz z Google AI Studio',
+        getApiKey: 'Pobierz klucz API →',
+        save: 'Zapisz',
+        noApiKey: 'Ustaw klucz API w Ustawieniach',
+        noApiKeyWarning: 'Ustaw klucz API w Ustawieniach ⚙️',
+        select2Languages: 'Wybierz 2 języki do tłumaczenia',
+        apiKeySaved: 'Klucz API zapisany!',
+        errorRecording: 'Brak dostępu do mikrofonu',
+        errorProcessing: 'Błąd przetwarzania audio',
+        errorNetwork: 'Błąd sieci. Spróbuj ponownie.',
     }
 };
 
@@ -55,6 +87,7 @@ const translations = {
 const state = {
     lang: localStorage.getItem('ui_lang') || 'en',
     apiKey: localStorage.getItem('gemini_api_key') || '',
+    selectedLangs: JSON.parse(localStorage.getItem('selected_langs')) || ['en', 'km'],
     isRecording: false,
     mediaRecorder: null,
     audioChunks: [],
@@ -80,9 +113,10 @@ const elements = {
     closeSettings: $('#closeSettings'),
     apiKeyInput: $('#apiKey'),
     saveSettings: $('#saveSettings'),
-    langToggle: $('#langToggle'),
+    langSelector: $('#langSelector'),
     toast: $('#toast'),
     apiWarning: $('#apiWarning'),
+    langWarning: $('#langWarning'),
 };
 
 // ========================================
@@ -97,16 +131,27 @@ function updateUI() {
     // Update all data-i18n elements
     $$('[data-i18n]').forEach(el => {
         const key = el.dataset.i18n;
-        el.textContent = t(key);
+        if (key) el.textContent = t(key);
     });
     
-    // Update language toggle
-    $$('.lang-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.lang === state.lang);
+    // Update language flag buttons
+    $$('.lang-flag-btn').forEach(btn => {
+        const lang = btn.dataset.lang;
+        btn.classList.toggle('active', state.selectedLangs.includes(lang));
     });
+    
+    // Show/hide language warning
+    updateLangWarning();
     
     // Update API warning visibility
     updateApiWarning();
+}
+
+function updateLangWarning() {
+    if (elements.langWarning) {
+        const hasTwo = state.selectedLangs.length === 2;
+        elements.langWarning.style.display = hasTwo ? 'none' : 'flex';
+    }
 }
 
 function updateApiWarning() {
@@ -155,6 +200,12 @@ function saveSettings() {
 // ========================================
 
 async function startRecording() {
+    // Check if 2 languages are selected
+    if (state.selectedLangs.length !== 2) {
+        showToast(t('select2Languages'), 'error');
+        return;
+    }
+    
     if (!state.apiKey) {
         showToast(t('noApiKey'), 'error');
         openSettings();
@@ -275,14 +326,19 @@ function blobToBase64(blob) {
 }
 
 async function callGeminiAPI(base64Audio) {
-    const prompt = `You are a translator for English and Khmer (Cambodian).
+    // Build dynamic prompt based on selected languages
+    const [lang1, lang2] = state.selectedLangs;
+    const name1 = LANGUAGES[lang1]?.name || lang1;
+    const name2 = LANGUAGES[lang2]?.name || lang2;
+    
+    const prompt = `You are a translator for ${name1} and ${name2}.
 Task:
 1. Listen to the audio and transcribe what is spoken.
-2. Detect if the language is English ('en') or Khmer ('km').
-3. Translate it to the other language (EN→KM or KM→EN).
+2. Detect if the language is ${name1} ('${lang1}') or ${name2} ('${lang2}').
+3. Translate it to the other language (${lang1.toUpperCase()}→${lang2.toUpperCase()} or ${lang2.toUpperCase()}→${lang1.toUpperCase()}).
 
 Return ONLY a JSON object with no markdown:
-{"lang":"en","text":"transcribed text","translation":"translated text"}`;
+{"lang":"${lang1}","text":"transcribed text","translation":"translated text"}`;
 
     const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.apiKey}`,
@@ -374,14 +430,31 @@ function initEventListeners() {
     // Close modal on backdrop click
     $('.modal-backdrop').addEventListener('click', closeSettings);
     
-    // Language toggle
-    elements.langToggle.addEventListener('click', (e) => {
-        if (e.target.classList.contains('lang-btn')) {
-            state.lang = e.target.dataset.lang;
-            localStorage.setItem('ui_lang', state.lang);
+    // Language selector (max 2 languages)
+    if (elements.langSelector) {
+        elements.langSelector.addEventListener('click', (e) => {
+            const btn = e.target.closest('.lang-flag-btn');
+            if (!btn) return;
+            
+            const lang = btn.dataset.lang;
+            const isActive = state.selectedLangs.includes(lang);
+            
+            if (isActive) {
+                // Deselect language
+                state.selectedLangs = state.selectedLangs.filter(l => l !== lang);
+            } else {
+                // Select language (only if less than 2 selected)
+                if (state.selectedLangs.length < 2) {
+                    state.selectedLangs.push(lang);
+                }
+                // If already 2 selected, do nothing (user must deselect first)
+            }
+            
+            // Save and update UI
+            localStorage.setItem('selected_langs', JSON.stringify(state.selectedLangs));
             updateUI();
-        }
-    });
+        });
+    }
     
     // Close settings with Escape key
     document.addEventListener('keydown', (e) => {
@@ -452,10 +525,24 @@ function initScrollArrows() {
 // Initialize
 // ========================================
 
+async function requestMicrophonePermission() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Stop the stream immediately - we just needed permission
+        stream.getTracks().forEach(track => track.stop());
+        console.log('Microphone permission granted');
+    } catch (error) {
+        console.warn('Microphone permission denied:', error);
+    }
+}
+
 function init() {
     updateUI();
     initEventListeners();
     initScrollArrows();
+    
+    // Request microphone permission on app load
+    requestMicrophonePermission();
 }
 
 // Start app when DOM is ready
