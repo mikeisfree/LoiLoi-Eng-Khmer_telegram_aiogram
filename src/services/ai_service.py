@@ -8,12 +8,12 @@ import base64
 import logging
 import aiohttp
 
-from config import GOOGLE_API_KEY, SUPPORTED_LANGUAGES
+from config import GOOGLE_API_KEY, GEMINI_MODEL, SUPPORTED_LANGUAGES
 
 logger = logging.getLogger(__name__)
 
 # Model configuration
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = GEMINI_MODEL
 API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
 
 
@@ -195,6 +195,88 @@ async def translate_text(text: str, lang_pair: tuple = ("en", "km")) -> dict:
     
     result = parse_json_response(text_response)
     logger.info(f"Translation: {result.get('from')} -> {result.get('to')}")
+    
+    return result
+
+
+async def translate_text_with_context(
+    text: str, 
+    lang_pair: tuple = ("en", "km"),
+    context: list = None,
+    source_lang: str = None
+) -> dict:
+    """
+    Translate text using Gemini with conversation context.
+    
+    Args:
+        text: Text to translate
+        lang_pair: Tuple of (lang1, lang2) for translation
+        context: List of previous chat messages in format ["Author: text", ...]
+        source_lang: Source language code (optional, for explicit language)
+        
+    Returns:
+        Dict with 'from', 'to', 'translation'
+    """
+    logger.info(f"Translating with context: {text[:50]}..., pair: {lang_pair}")
+    
+    lang1, lang2 = lang_pair
+    name1 = get_lang_name(lang1)
+    name2 = get_lang_name(lang2)
+    
+    # Build prompt with context
+    prompt = f"""You are a helpful translation assistant for {name1} and {name2}.
+Your task is to translate text between these two languages while maintaining conversation context.
+
+**Recent chat messages (context only - do NOT translate these):**
+"""
+    
+    if context:
+        for msg in context:
+            prompt += f"{msg}\n"
+        prompt += "\n"
+    
+    prompt += f"""**Current message to translate** (use the context above to resolve pronouns, gender, slang and references):
+"""
+    
+    # Add source language hint if provided
+    if source_lang:
+        source_name = get_lang_name(source_lang)
+        target_lang = lang2 if source_lang == lang1 else lang1
+        target_name = get_lang_name(target_lang)
+        prompt += f"(This text is in {source_name} and should be translated to {target_name})\n\n"
+    
+    prompt += f"""Return ONLY a JSON object with no markdown:
+{{"from":"{lang1}","to":"{lang2}","translation":"translated text"}}
+
+Text: """
+    
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt + text}]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 1024,
+        }
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{API_URL}?key={GOOGLE_API_KEY}",
+            json=payload,
+            headers={"Content-Type": "application/json"}
+        ) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"API error {response.status}: {error_text[:200]}")
+                raise ValueError(f"API error: {response.status}")
+            
+            data = await response.json()
+    
+    text_response = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+    
+    result = parse_json_response(text_response)
+    logger.info(f"Context translation: {result.get('from')} -> {result.get('to')}")
     
     return result
 

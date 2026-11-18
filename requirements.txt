@@ -1,5 +1,15 @@
+# Core
 aiogram>=3.0.0
+
+# HTTP client for AI API
 aiohttp
-pydub
+
+# Audio processing
+# Using pydub-lts fork which supports Python 3.13+ (audioop was removed in Python 3.13)
+pydub-lts>=0.25.1
+
+# Environment variables
 python-dotenv
+
+# Async file operations
 aiofiles

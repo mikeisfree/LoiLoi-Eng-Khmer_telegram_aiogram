@@ -11,6 +11,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Google AI
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 
 # Limits (MVP - test values)
 MAX_AUDIO_DURATION_SECONDS = int(os.getenv("MAX_AUDIO_DURATION_SECONDS", 60))
@@ -28,6 +29,7 @@ SUPPORTED_LANGUAGES = {
     "en": {"name": "English", "flag": "🇬🇧"},
     "km": {"name": "ខ្មែរ (Khmer)", "flag": "🇰🇭"},
     "pl": {"name": "Polski", "flag": "🇵🇱"},
+    "uk": {"name": "Українська", "flag": "🇺🇦"},
 }
 
 # Available language pairs
@@ -35,10 +37,11 @@ LANGUAGE_PAIRS = [
     ("en", "km"),
     ("en", "pl"),
     ("km", "pl"),
+    ("pl", "uk"),
 ]
 
-# Default language pair
-DEFAULT_LANG_PAIR = ("en", "km")
+# Default language pair - Polish <-> Ukrainian for auto-translation
+DEFAULT_LANG_PAIR = ("pl", "uk")
 
 # UI Messages - English, Khmer and Polish
 MESSAGES = {
@@ -125,26 +128,22 @@ Send any voice message and the bot will:
         "translation": "🔄 **ការបកប្រែ:**",
     },
     "pl": {
-        "welcome": """🎙️ Cześć! Jestem botem tłumaczącym głos.
+        "welcome": "Siema. Tu Adam. Jestem asystentem Michała. Znam płynnie ukraiński. Pomogę w tłumaczeniu na bieżąco",
 
-📢 Jak używać:
-• Wyślij wiadomość głosową
-• /t Hello - tłumacz tekst
-• /pair - wybierz parę języków
+        "help": """📖 **Pomoc - Bot Tłumaczący PL↔UK**
 
-🌐 Języki: 🇬🇧 English, 🇰🇭 ខ្មែរ, 🇵🇱 Polski
-
-🔤 /lang - zmień język interfejsu
-ℹ️ /help - pomoc""",
-
-        "help": """📖 **Pomoc - Bot Tłumaczący**
+**Automatyczne tłumaczenie:**
+• Wszystkie wiadomości tekstowe są automatycznie tłumaczone między polskim a ukraińskim
+• Bot pamięta kontekst ostatnich wpisów dla lepszego tłumaczenia
 
 **Komendy:**
 • `/start` - wiadomość powitalna
 • `/help` - ta wiadomość
-• `/t <tekst>` - tłumacz tekst
-• `/pair` - wybierz języki tłumaczenia
 • `/lang` - zmień język interfejsu
+• `/clear` - wyczyść kontekst rozmowy
+
+**Wiadomości głosowe:**
+Wyślij wiadomość głosową - bot przetłumaczy ją automatycznie
 
 ⏱️ Max długość nagrania: 60 sekund""",
 
@@ -161,8 +160,44 @@ Send any voice message and the bot will:
         "detected_lang": "🎤 **Wykryty język:** {lang}",
         "transcription": "📝 **Transkrypcja:**",
         "translation": "🔄 **Tłumaczenie:**",
+        "context_cleared": "🗑️ Kontekst rozmowy został wyczyszczony",
+    },
+    "uk": {
+        "welcome": "Слухаю. Я Адам. Я асистент Міхала. Вільно володію українською. Допоможу з перекладом онлайн",
+
+        "help": """📖 **Довідка - Бот перекладач PL↔UK**
+
+**Автоматичний переклад:**
+• Всі текстові повідомлення автоматично перекладаються між польською та українською
+• Бот пам'ятає контекст останніх повідомлень для кращого перекладу
+
+**Команди:**
+• `/start` - вітальне повідомлення
+• `/help` - ця довідка
+• `/lang` - змінити мову інтерфейсу
+• `/clear` - очистити контекст розмови
+
+**Голосові повідомлення:**
+Надішліть голосове повідомлення - бот автоматично його перекладе
+
+⏱️ Максимальна тривалість запису: 60 секунд""",
+
+        "lang_prompt": "🌐 Оберіть мову інтерфейсу:",
+        "lang_changed": "✅ Мова інтерфейсу змілена на Українську",
+        "pair_prompt": "🔄 Оберіть пару мов:",
+        "pair_changed": "✅ Пара мов: {lang1} ↔ {lang2}",
+        "current_pair": "Поточна пара: {lang1} ↔ {lang2}",
+        "error_audio_too_long": "⚠️ Запис занадто довгий. Максимум: {max_seconds} секунд.",
+        "error_rate_limit": "⏳ Ліміт перевищено. Спробуйте через {minutes} хвилин.",
+        "error_processing": "❌ Виникла помилка. Спробуйте ще раз.",
+        "error_text_required": "⚠️ Будь ласка, надайте текст для перекладу.",
+        "processing": "⏳ Обробка...",
+        "detected_lang": "🎤 **Виявлена мова:** {lang}",
+        "transcription": "📝 **Транскрибація:**",
+        "translation": "🔄 **Переклад:**",
+        "context_cleared": "🗑️ Контекст розмови очищено",
     }
 }
 
 # Default language for new users
-DEFAULT_LANG = "en"
+DEFAULT_LANG = "pl"
